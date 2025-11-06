@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="
+           http://maven.apache.org/POM/4.0.0
+           http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.saratoga.ohs</groupId>
+  <artifactId>safety-alert-service</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>Safety Alert Service</name>
+  <description>OHS Compliance - Safety Alert microservice</description>
+
+  <!-- Use Spring Boot parent to simplify dependency and plugin management -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.1.5</version>
+    <relativePath/> <!-- lookup parent from repository -->
+  </parent>
+
+  <properties>
+    <!-- Java and encoding -->
+    <java.version>17</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- Common plugin versions -->
+    <maven.compiler.plugin.version>3.10.1</maven.compiler.plugin.version>
+    <jacoco.version>0.8.8</jacoco.version>
+    <jib.plugin.version>3.3.1</jib.plugin.version>
+    <sonar.maven.plugin.version>3.11.0.2311</sonar.maven.plugin.version>
+
+    <!-- Image / registry placeholders: replace with your ACR or Nexus Docker registry -->
+    <container.registry><ACR_LOGIN_SERVER></container.registry>
+    <container.image.prefix>${container.registry}/ohs</container.image.prefix>
+
+    <!-- name of artifact inside registry -->
+    <docker.image>${container.image.prefix}/${project.artifactId}:${project.version}</docker.image>
+  </properties>
+
+  <dependencies>
+    <!-- Spring Boot web and actuator -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- JPA + Postgres -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Flyway (DB migrations) -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+
+    <!-- Observability: Micrometer with Prometheus -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+
+    <!-- Lombok (compile-time only) -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- Logging - spring-boot-starter includes Logback by default -->
+
+    <!-- Tests -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>org.junit.vintage</groupId>
+          <artifactId>junit-vintage-engine</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>${project.artifactId}-${project.version}</finalName>
+
+    <plugins>
+
+      <!-- Compiler plugin -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven.compiler.plugin.version}</version>
+        <configuration>
+          <source>${java.version}</source>
+          <target>${java.version}</target>
+          <encoding>${project.build.sourceEncoding}</encoding>
+          <parameters>true</parameters>
+        </configuration>
+      </plugin>
+
+      <!-- Spring Boot plugin (runs, repackage jar) -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!-- disable layered for simpler images if you use Jib; keep if you want boot repackage -->
+          <mainClass>com.saratoga.ohs.SafetyAlertServiceApplication</mainClass>
+        </configuration>
+      </plugin>
+
+      <!-- JaCoCo for code coverage -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <executions>
+          <!-- prepare agent for unit tests -->
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <!-- generate report after tests -->
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Jib - build and push container images (no Docker daemon required) -->
+      <plugin>
+        <groupId>com.google.cloud.tools</groupId>
+        <artifactId>jib-maven-plugin</artifactId>
+        <version>${jib.plugin.version}</version>
+        <configuration>
+          <!-- Destination image; Jib will use credentials from Maven settings.xml (server id) or from environment -->
+          <to>
+            <image>${docker.image}</image>
+          </to>
+          <container>
+            <jvmFlags>
+              <jvmFlag>-Xms256m</jvmFlag>
+              <jvmFlag>-Xmx512m</jvmFlag>
+            </jvmFlags>
+            <mainClass>com.saratoga.ohs.SafetyAlertServiceApplication</mainClass>
+            <ports>
+              <port>8080</port>
+            </ports>
+          </container>
+        </configuration>
+      </plugin>
+
+      <!-- Sonar scanner (integration step executed by CI) -->
+      <plugin>
+        <groupId>org.sonarsource.scanner.maven</groupId>
+        <artifactId>sonar-maven-plugin</artifactId>
+        <version>${sonar.maven.plugin.version}</version>
+      </plugin>
+
+      <!-- Surefire for unit tests -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0-M9</version>
+        <configuration>
+          <useSystemClassLoader>true</useSystemClassLoader>
+          <includes>
+            <include>**/*Test.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+
+      <!-- Failsafe for integration tests (if you use integration-test phase) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>3.0.0-M7</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+    </plugins>
+  </build>
+
+  <!-- Example places where you might configure artifact distribution to Nexus.
+       If you use Nexus, uncomment and set URLs/credentials in settings.xml (server id), or configure distributionManagement. -->
+  <!--
+  <distributionManagement>
+    <repository>
+      <id>nexus-releases</id>
+      <name>Nexus Releases</name>
+      <url>http://<NEXUS_HOST>:8081/repository/maven-releases/</url>
+    </repository>
+    <snapshotRepository>
+      <id>nexus-snapshots</id>
+      <name>Nexus Snapshots</name>
+      <url>http://<NEXUS_HOST>:8081/repository/maven-snapshots/</url>
+    </snapshotRepository>
+  </distributionManagement>
+  -->
+
+  <profiles>
+    <!-- Fast CI profile: run unit tests, sonar, build image and skip integration tests -->
+    <profile>
+      <id>ci</id>
+      <activation>
+        <property>
+          <name>env.CI</name>
+        </property>
+      </activation>
+      <properties>
+        <skipITs>true</skipITs>
+      </properties>
+      <build>
+        <plugins>
+          <!-- You can customize plugin executions for CI here if desired -->
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- Integration test profile (example) -->
+    <profile>
+      <id>integration-tests</id>
+      <properties>
+        <skipITs>false</skipITs>
+      </properties>
+    </profile>
+  </profiles>
+
+  <reporting>
+    <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+      </plugin>
+    </plugins>
+  </reporting>
+
+</project>
+
