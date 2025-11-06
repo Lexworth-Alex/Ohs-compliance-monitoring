@@ -1,0 +1,44 @@
+pipeline {
+  agent any
+  environment {
+    ACR_LOGIN = "${env.ACR_LOGIN_SERVER}"
+    ACR_USER = credentials('acr-username')
+    ACR_PWD  = credentials('acr-password')
+    KUBECONFIG = credentials('kubeconfig')
+  }
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+    stage('Build images') {
+      steps {
+        sh 'docker build -t $ACR_LOGIN/ohs/service-api:latest ./services/service-api'
+        sh 'docker build -t $ACR_LOGIN/ohs/service-auth:latest ./services/service-auth'
+        sh 'docker build -t $ACR_LOGIN/ohs/service-worker:latest ./services/service-worker'
+        sh 'docker build -t $ACR_LOGIN/ohs/service-ui:latest ./services/service-ui'
+      }
+    }
+    stage('Push images') {
+      steps {
+        sh 'echo $ACR_PWD | docker login $ACR_LOGIN -u $ACR_USER --password-stdin'
+        sh 'docker push $ACR_LOGIN/ohs/service-api:latest'
+        sh 'docker push $ACR_LOGIN/ohs/service-auth:latest'
+        sh 'docker push $ACR_LOGIN/ohs/service-worker:latest'
+        sh 'docker push $ACR_LOGIN/ohs/service-ui:latest'
+      }
+    }
+    stage('Deploy to Kubernetes') {
+      steps {
+        writeFile file: 'kubeconfig', text: KUBECONFIG
+        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/namespace.yaml'
+        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/registry-secret.yaml'
+        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/postgres-statefulset.yaml'
+        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/api-deployment.yaml'
+        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/ingress.yaml'
+      }
+    }
+  }
+}
+

@@ -1,0 +1,9 @@
+1. Create Azure resource group, ACR and Jenkins VM (run azure-setup/az_acr_and_vm.sh)
+2. Install Jenkins on the VM (azure-setup/setup-jenkins-ubuntu.sh)
+3. Add Jenkins credentials for ACR and Kubernetes kubeconfig
+4. Create kubernetes namespace and image pull secret (use kubectl create secret docker-registry ...)
+5. From Jenkins, run pipeline to build, push images, and deploy manifests
+6. Install Prometheus + Grafana (use Helm kube-prometheus-stack recommended)
+7. Configure Grafana datasource (Prometheus) and import dashboards
+8. Set up alerts in PrometheusAlertmanager if required
+

@@ -1,0 +1,31 @@
+# OHS Compliance Monitoring — Quick start
+
+
+This repo contains a containerized microservice system for Occupational Health & Safety Compliance Monitoring.
+
+
+## What this includes
+- Microservices (API, Auth, Worker, UI)
+- Kubernetes manifests to deploy to your on-prem cluster
+- Jenkins pipeline (Jenkinsfile) for CI/CD that builds images, pushes to ACR, and deploys to Kubernetes
+- Azure helper scripts to create an Azure VM for Jenkins and an Azure Container Registry (ACR)
+- Prometheus and Grafana manifest instructions
+
+
+## Quick workflow
+1. Provision Azure resources (ACR, VM) with `azure-setup/az_acr_and_vm.sh`.
+2. Install Jenkins on the Azure VM using `azure-setup/setup-jenkins-ubuntu.sh`.
+3. From Jenkins, the pipeline will build images and push to ACR.
+4. Kubernetes cluster pulls images from ACR using a `docker-registry` secret and deploys manifests in `infra/k8s/`.
+
+
+## Pre-requisites
+- Azure CLI installed and logged in (`az login`).
+- kubectl configured for your Kubernetes cluster and connectivity from Jenkins to the cluster.
+- Docker installed locally to build and test images.
+- GitHub repo created and this tree pushed.
+
+
+## Notes
+- Kubernetes cluster is expected to be externally-managed (on-prem or VMs). This repo does not create AKS.
+- Use least-privilege service accounts for Jenkins to access Kubernetes.

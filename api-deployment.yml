@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-api
+  namespace: ohs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: service-api
+  template:
+    metadata:
+      labels:
+        app: service-api
+    spec:
+      imagePullSecrets:
+      - name: acr-pull-secret
+      containers:
+      - name: service-api
+        image: <ACR_LOGIN_SERVER>/ohs/service-api:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DATABASE_URL
+          value: postgres://ohsuser:<password>@postgres.ohs.svc.cluster.local:5432/ohsdb
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10

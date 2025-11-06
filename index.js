@@ -1,0 +1,5 @@
+const express = require('express')
+const app = express()
+app.get('/health', (req,res)=> res.send('OK'))
+app.get('/token', (req,res)=> res.json({token: 'demo-token'}))
+app.listen(3000, ()=> console.log('auth listening'))
