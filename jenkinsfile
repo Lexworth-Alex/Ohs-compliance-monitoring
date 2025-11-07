@@ -12,6 +12,16 @@ pipeline {
         checkout scm
       }
     }
+stage('SonarQube Analysis') {
+    environment {
+        scannerHome = tool 'SonarQubeScanner'
+    }
+    steps {
+        withSonarQubeEnv('SonarQubeServer') {
+            sh "${scannerHome}/bin/sonar-scanner"
+        }
+    }
+
     stage('Build images') {
       steps {
         sh 'docker build -t $ACR_LOGIN/ohs/service-api:latest ./services/service-api'
