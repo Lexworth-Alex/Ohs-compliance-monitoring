@@ -1,59 +1,113 @@
 pipeline {
   agent any
-  environment {
-    ACR_LOGIN = "${env.ACR_LOGIN_SERVER}"
-    ACR_USER = credentials('acr-username')
-    ACR_PWD  = credentials('acr-password')
-    KUBECONFIG = credentials('kubeconfig')
+
+  tools {
+    // Optional: name these tool installations in Jenkins (Manage Jenkins → Global Tool Configuration)
+    maven 'M3'                     // give your Maven install the name 'M3' in Jenkins
+    // sonar scanner optional: name the SonarQube scanner tool in Jenkins if you use it
+    // sonar 'SonarQubeScanner'
   }
+
+  environment {
+    // ACR login server (set this as pipeline parameter or environment variable in Jenkins)
+    ACR_LOGIN = "${env.ACR_LOGIN_SERVER}"
+    // Kubeconfig and ACR credentials are stored in Jenkins Credentials and injected with `withCredentials` below
+    // Keep these placeholders — create matching credentials in Jenkins
+    KUBECONFIG_CRED_ID = 'kubeconfig'
+    ACR_CRED_ID = 'acr-credentials'       // should be a usernamePassword credential or a secret text/token
+    NEXUS_CRED_ID = 'nexus-credentials'   // optional: if using Nexus authentication for mvn deploy
+  }
+
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
       }
     }
-stage('SonarQube Analysis') {
-    environment {
-        scannerHome = tool 'SonarQubeScanner'
-    }
-    steps {
-        withSonarQubeEnv('SonarQubeServer') {
-            sh "${scannerHome}/bin/sonar-scanner"
-        }
+
+    stage('Build & Test (Maven)') {
+      steps {
+        // Run a full build including tests (adjust flags for CI speed if needed)
+        sh 'mvn -B clean verify'
+      }
     }
 
-    stage('Build images') {
+    stage('SonarQube Analysis') {
+      // If you configured SonarQube server in Jenkins, use withSonarQubeEnv
       steps {
-        sh 'docker build -t $ACR_LOGIN/ohs/service-api:latest ./services/service-api'
-        sh 'docker build -t $ACR_LOGIN/ohs/service-auth:latest ./services/service-auth'
-        sh 'docker build -t $ACR_LOGIN/ohs/service-worker:latest ./services/service-worker'
-        sh 'docker build -t $ACR_LOGIN/ohs/service-ui:latest ./services/service-ui'
+        withSonarQubeEnv('SonarQubeServer') {
+          // Run Sonar analysis. Optionally pass -Dsonar.login if you use token credentials
+          sh 'mvn -B sonar:sonar'
+        }
       }
     }
-stage('Upload Artifact to Nexus') {
-    steps {
-        sh 'mvn deploy'
-    }
-}
-    stage('Push images') {
+
+    stage('Upload Artifact to Nexus') {
+      when {
+        expression { return env.NEXUS_CRED_ID != null }
+      }
       steps {
-        sh 'echo $ACR_PWD | docker login $ACR_LOGIN -u $ACR_USER --password-stdin'
-        sh 'docker push $ACR_LOGIN/ohs/service-api:latest'
-        sh 'docker push $ACR_LOGIN/ohs/service-auth:latest'
-        sh 'docker push $ACR_LOGIN/ohs/service-worker:latest'
-        sh 'docker push $ACR_LOGIN/ohs/service-ui:latest'
+        // Assumes settings.xml on Jenkins is configured for Nexus or you have server credentials
+        sh 'mvn -B deploy -DskipTests'
       }
     }
+
+    stage('Build Docker Images') {
+      steps {
+        // Build images for each service. You can replace with jib:build if preferred.
+        sh "docker build -t ${ACR_LOGIN}/ohs/service-api:latest ./services/service-api"
+        sh "docker build -t ${ACR_LOGIN}/ohs/service-auth:latest ./services/service-auth"
+        sh "docker build -t ${ACR_LOGIN}/ohs/service-worker:latest ./services/service-worker"
+        sh "docker build -t ${ACR_LOGIN}/ohs/service-ui:latest ./services/service-ui"
+      }
+    }
+
+    stage('Push Docker Images to ACR') {
+      steps {
+        // Use Jenkins credentials to log in to ACR. Create a username/password credential with id = ${ACR_CRED_ID}
+        withCredentials([usernamePassword(credentialsId: "${ACR_CRED_ID}", usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PWD')]) {
+          sh "echo ${ACR_PWD} | docker login ${ACR_LOGIN} -u ${ACR_USER} --password-stdin"
+          sh "docker push ${ACR_LOGIN}/ohs/service-api:latest"
+          sh "docker push ${ACR_LOGIN}/ohs/service-auth:latest"
+          sh "docker push ${ACR_LOGIN}/ohs/service-worker:latest"
+          sh "docker push ${ACR_LOGIN}/ohs/service-ui:latest"
+        }
+      }
+    }
+
     stage('Deploy to Kubernetes') {
       steps {
-        writeFile file: 'kubeconfig', text: KUBECONFIG
-        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/namespace.yaml'
-        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/registry-secret.yaml'
-        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/postgres-statefulset.yaml'
-        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/api-deployment.yaml'
-        sh 'kubectl --kubeconfig=kubeconfig apply -f infra/k8s/ingress.yaml'
+        // Inject kubeconfig stored as a secret file in Jenkins credentials (type: secret file)
+        withCredentials([file(credentialsId: "${KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG_FILE')]) {
+          // Write kubeconfig to a file the kubectl can use
+          sh 'mkdir -p $WORKSPACE/.kube'
+          sh 'cp $KUBECONFIG_FILE $WORKSPACE/.kube/config'
+          // Apply manifests using that kubeconfig
+          sh 'kubectl --kubeconfig=$WORKSPACE/.kube/config apply -f infra/k8s/namespace.yaml'
+          sh 'kubectl --kubeconfig=$WORKSPACE/.kube/config apply -f infra/k8s/registry-secret.yaml'
+          sh 'kubectl --kubeconfig=$WORKSPACE/.kube/config apply -f infra/k8s/postgres-statefulset.yaml'
+          sh 'kubectl --kubeconfig=$WORKSPACE/.kube/config apply -f infra/k8s/api-deployment.yaml'
+          sh 'kubectl --kubeconfig=$WORKSPACE/.kube/config apply -f infra/k8s/ingress.yaml'
+        }
       }
+    }
+
+  } // stages
+
+  post {
+    always {
+      // cleanup docker credentials or temporary files if needed
+      sh 'docker logout ${ACR_LOGIN} || true'
+      cleanWs()
+    }
+    success {
+      echo "Pipeline finished successfully."
+    }
+    failure {
+      echo "Pipeline failed. Check the logs above."
     }
   }
 }
+
 
