@@ -30,6 +30,11 @@ stage('SonarQube Analysis') {
         sh 'docker build -t $ACR_LOGIN/ohs/service-ui:latest ./services/service-ui'
       }
     }
+stage('Upload Artifact to Nexus') {
+    steps {
+        sh 'mvn deploy'
+    }
+}
     stage('Push images') {
       steps {
         sh 'echo $ACR_PWD | docker login $ACR_LOGIN -u $ACR_USER --password-stdin'
